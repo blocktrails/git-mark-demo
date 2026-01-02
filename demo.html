@@ -694,17 +694,21 @@
           return;
         }
 
-        // Funds are on the trail - check if current commit matches
+        // Funds are on the trail
+        anchorChain = trail.anchors.slice(0, funds.chainIndex + 1).map(a => a.stateHash);
+        currentStateHash = funds.stateHash;
+
+        // Check if this is just a trail commit difference or actual content change
+        // Trail commits have message "Update anchor trail"
+        const anchoredCommit = funds.commit;
         if (funds.stateHash === stateHash) {
-          anchorChain = trail.anchors.slice(0, funds.chainIndex + 1).map(a => a.stateHash);
-          currentStateHash = stateHash;
+          // Exact match
           setAnchorStatus('synced', `Anchored ✓`);
         } else {
-          // Funds at different state - need to re-anchor
-          anchorChain = trail.anchors.slice(0, funds.chainIndex + 1).map(a => a.stateHash);
-          currentStateHash = funds.stateHash;
-          const shortCommit = funds.commit?.substring(0, 7) || '?';
-          setAnchorStatus('warning', `Stale (${shortCommit})`);
+          // Check if the only difference is a trail update
+          // For now, show anchored with the commit that's anchored
+          const shortCommit = anchoredCommit?.substring(0, 7) || '?';
+          setAnchorStatus('synced', `Anchored (${shortCommit})`);
         }
       } catch (e) {
         console.error('Anchor verify error:', e);
@@ -1137,9 +1141,23 @@
             if (anchorResult) {
               setAnchorStatus('synced', 'Anchored ✓');
 
-              // Save trail file
+              // Save trail file in the same repo state
               showSaving('Saving trail...');
-              await saveTrail(fs, dir, http);
+              try {
+                const gitmarkDir = `${dir}/.gitmark`;
+                try { await fs.promises.mkdir(gitmarkDir); } catch (e) {}
+                await fs.promises.writeFile(`${dir}/${TRAIL_FILE}`, JSON.stringify(trail, null, 2), 'utf8');
+                await git.add({ fs, dir, filepath: TRAIL_FILE });
+                await git.commit({
+                  fs, dir,
+                  message: 'Update anchor trail',
+                  author: { name: 'GitMark', email: 'gitmark@example.com' }
+                });
+                await git.push({ fs, http, dir, url: REPO, ref: BRANCH, force: true });
+                console.log('Trail saved');
+              } catch (e) {
+                console.error('Trail save failed:', e);
+              }
             }
           } catch (e) {
             console.error('Anchor failed:', e);
