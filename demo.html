@@ -586,32 +586,32 @@
     }
 
     // Save trail to repo (called after anchoring, during save flow)
-    async function saveTrail(dir) {
+    async function saveTrail(pfs, dir, httpClient) {
       if (!trail) return;
       try {
         // Ensure .gitmark directory exists
         const gitmarkDir = `${dir}/.gitmark`;
         try {
-          await fs.promises.mkdir(gitmarkDir);
+          await pfs.promises.mkdir(gitmarkDir);
         } catch (e) {
           // Directory may already exist
         }
 
         const content = JSON.stringify(trail, null, 2);
         const trailPath = `${dir}/${TRAIL_FILE}`;
-        await fs.promises.writeFile(trailPath, content, 'utf8');
+        await pfs.promises.writeFile(trailPath, content, 'utf8');
 
-        await git.add({ fs, dir, filepath: TRAIL_FILE });
+        await git.add({ fs: pfs, dir, filepath: TRAIL_FILE });
         await git.commit({
-          fs,
+          fs: pfs,
           dir,
           message: 'Update anchor trail',
           author: { name: 'GitMark', email: 'gitmark@example.com' }
         });
 
         await git.push({
-          fs,
-          http,
+          fs: pfs,
+          http: httpClient,
           dir,
           url: REPO,
           ref: BRANCH,
@@ -1139,7 +1139,7 @@
 
               // Save trail file
               showSaving('Saving trail...');
-              await saveTrail(dir);
+              await saveTrail(fs, dir, http);
             }
           } catch (e) {
             console.error('Anchor failed:', e);
