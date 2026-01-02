@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitMark - Bitcoin Anchored Notes</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    header {
+      text-align: center;
+      padding: 40px 20px;
+      border-bottom: 1px solid #2a2a3a;
+      margin-bottom: 30px;
+    }
+    h1 {
+      color: #a78bfa;
+      margin: 0 0 10px 0;
+      font-size: 2.5rem;
+    }
+    .tagline {
+      color: #888;
+      font-size: 1.1rem;
+    }
+    .status-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 15px;
+      margin-top: 15px;
+      flex-wrap: wrap;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: #1a1a2e;
+      border-radius: 20px;
+      font-size: 13px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #666;
+    }
+    .dot.syncing { background: #f59e0b; animation: pulse 1s infinite; }
+    .dot.synced { background: #10b981; }
+    .dot.error { background: #ef4444; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+
+    .toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: #1a1a2e;
+      border-radius: 20px;
+      font-size: 13px;
+      cursor: pointer;
+      border: 1px solid #2a2a3a;
+    }
+    .toggle-btn:hover { border-color: #a78bfa; }
+    .toggle-btn.active {
+      background: #7c3aed;
+      border-color: #7c3aed;
+    }
+
+    .key-panel {
+      display: none;
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      border: 1px solid #2a2a3a;
+    }
+    .key-panel.show { display: block; }
+    .key-panel label {
+      display: block;
+      color: #888;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .key-panel input {
+      width: 100%;
+      padding: 10px;
+      background: #0f0f1a;
+      border: 1px solid #2a2a3a;
+      border-radius: 6px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .key-panel input:focus {
+      outline: none;
+      border-color: #7c3aed;
+    }
+    .key-panel .hint {
+      color: #666;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .key-panel .pubkey {
+      color: #10b981;
+      font-family: monospace;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    .notes-list {
+      display: grid;
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+    .note-card {
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 20px;
+      cursor: pointer;
+      border: 1px solid #2a2a3a;
+      transition: all 0.2s;
+    }
+    .note-card:hover {
+      border-color: #a78bfa;
+      transform: translateY(-2px);
+    }
+    .note-card h3 {
+      margin: 0 0 8px 0;
+      color: #fff;
+    }
+    .note-card p {
+      margin: 0;
+      color: #888;
+      font-size: 14px;
+    }
+
+    .new-note-btn {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      padding: 15px 20px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      width: 100%;
+      margin-bottom: 15px;
+      display: none;
+    }
+    .new-note-btn:hover { background: #6d28d9; }
+    .new-note-btn.show { display: block; }
+
+    .note-view {
+      display: none;
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 30px;
+      border: 1px solid #2a2a3a;
+    }
+    .note-view.active { display: block; }
+
+    .note-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .back-btn, .edit-btn, .save-btn, .cancel-btn {
+      background: none;
+      border: 1px solid #444;
+      color: #888;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .back-btn:hover, .edit-btn:hover, .cancel-btn:hover {
+      border-color: #a78bfa;
+      color: #a78bfa;
+    }
+    .save-btn {
+      background: #7c3aed;
+      border-color: #7c3aed;
+      color: white;
+    }
+    .save-btn:hover { background: #6d28d9; }
+    .save-btn:disabled {
+      background: #444;
+      border-color: #444;
+      cursor: not-allowed;
+    }
+    .edit-btn { display: none; }
+    .edit-btn.show { display: inline-block; }
+    .btn-group { display: flex; gap: 10px; }
+
+    .note-editor {
+      display: none;
+      width: 100%;
+      min-height: 400px;
+      padding: 15px;
+      background: #0f0f1a;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    .note-editor:focus {
+      outline: none;
+      border-color: #7c3aed;
+    }
+    .note-editor.active { display: block; }
+
+    .filename-input {
+      width: 100%;
+      padding: 10px;
+      background: #0f0f1a;
+      border: 1px solid #2a2a3a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+    .filename-input:focus {
+      outline: none;
+      border-color: #7c3aed;
+    }
+
+    /* Markdown styles */
+    .markdown h1 { color: #a78bfa; border-bottom: 1px solid #2a2a3a; padding-bottom: 10px; }
+    .markdown h2 { color: #8b5cf6; margin-top: 30px; }
+    .markdown h3 { color: #7c3aed; }
+    .markdown p { line-height: 1.7; }
+    .markdown a { color: #60a5fa; }
+    .markdown code {
+      background: #0f0f1a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Monaco', monospace;
+      font-size: 0.9em;
+    }
+    .markdown pre {
+      background: #0f0f1a;
+      padding: 15px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .markdown pre code { background: none; padding: 0; }
+    .markdown blockquote {
+      border-left: 3px solid #a78bfa;
+      margin: 20px 0;
+      padding-left: 20px;
+      color: #aaa;
+      font-style: italic;
+    }
+    .markdown ul, .markdown ol {
+      padding-left: 25px;
+      line-height: 1.8;
+    }
+
+    .update-toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #7c3aed;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      display: none;
+      animation: slideIn 0.3s;
+    }
+    .update-toast.show { display: block; }
+    @keyframes slideIn {
+      from { transform: translateY(100px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .last-updated {
+      color: #666;
+      font-size: 12px;
+      margin-top: 10px;
+      text-align: center;
+    }
+    .last-updated .time { color: #10b981; font-weight: 500; }
+
+    .footer {
+      text-align: center;
+      padding: 30px;
+      color: #555;
+      font-size: 13px;
+    }
+    .footer a { color: #a78bfa; }
+
+    .saving-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+    .saving-overlay.show { display: flex; }
+    .saving-box {
+      background: #1a1a2e;
+      padding: 30px 50px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    .saving-box .spinner {
+      width: 30px;
+      height: 30px;
+      border: 3px solid #333;
+      border-top-color: #7c3aed;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⚓ GitMark</h1>
+      <p class="tagline">Bitcoin-anchored notes - trustless state verification</p>
+      <div class="status-row">
+        <div class="status">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">Connecting...</span>
+        </div>
+        <div class="status" id="anchorStatus" style="display:none;">
+          <span class="dot" id="anchorDot"></span>
+          <span id="anchorText">Not anchored</span>
+        </div>
+        <div class="toggle-btn" id="editToggle" onclick="toggleEditMode()">
+          ✏️ Edit Mode
+        </div>
+        <div class="toggle-btn" id="settingsToggle" onclick="toggleSettings()">
+          ⚙️ Settings
+        </div>
+      </div>
+      <div id="lastUpdated" class="last-updated"></div>
+    </header>
+
+    <div id="keyPanel" class="key-panel">
+      <label>Nostr Private Key (hex)</label>
+      <input type="password" id="privkeyInput" placeholder="Enter your private key to enable editing..." oninput="onPrivkeyChange()">
+      <div class="hint">Used to sign commits and Nostr events.</div>
+      <div id="pubkeyDisplay" class="pubkey"></div>
+
+      <label style="margin-top: 15px;">Bitcoin Private Key (hex) - for anchoring</label>
+      <input type="password" id="btcPrivkeyInput" placeholder="Enter or generate a Bitcoin key..." oninput="onBtcKeyChange()">
+      <div style="display: flex; gap: 10px; margin-top: 8px;">
+        <button onclick="generateBtcKey()" style="padding: 6px 12px; background: #f59e0b; border: none; border-radius: 4px; color: #000; cursor: pointer; font-size: 12px;">Generate New</button>
+        <button onclick="checkBalance()" style="padding: 6px 12px; background: #1a1a2e; border: 1px solid #2a2a3a; border-radius: 4px; color: #888; cursor: pointer; font-size: 12px;">Check Balance</button>
+      </div>
+      <div class="hint">Used to anchor state to Bitcoin testnet4.</div>
+      <div id="btcAddressDisplay" class="pubkey"></div>
+    </div>
+
+    <div id="settingsPanel" class="key-panel">
+      <label>Repository URL</label>
+      <input type="text" id="repoInput" placeholder="https://example.com/user/repo" oninput="onSettingsChange()">
+      <div class="hint" style="margin-bottom: 15px;">Git repository URL (must support CORS)</div>
+      <label>Branch</label>
+      <input type="text" id="branchInput" placeholder="main" oninput="onSettingsChange()">
+      <div class="hint">Branch to sync (default: main)</div>
+      <button id="applySettingsBtn" onclick="applySettings()" style="margin-top: 15px; padding: 10px 20px; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 14px;">Apply & Reload</button>
+    </div>
+
+    <button id="newNoteBtn" class="new-note-btn" onclick="newNote()">+ New Note</button>
+
+    <div id="notesList" class="notes-list"></div>
+
+    <div id="noteView" class="note-view">
+      <div class="note-header">
+        <button class="back-btn" onclick="showList()">← Back</button>
+        <div class="btn-group">
+          <button id="editBtn" class="edit-btn" onclick="startEdit()">✏️ Edit</button>
+          <button id="cancelBtn" class="cancel-btn" style="display:none" onclick="cancelEdit()">Cancel</button>
+          <button id="saveBtn" class="save-btn" style="display:none" onclick="saveNote()">Save & Push</button>
+        </div>
+      </div>
+      <input type="text" id="filenameInput" class="filename-input" style="display:none" placeholder="filename.md">
+      <textarea id="noteEditor" class="note-editor"></textarea>
+      <div id="noteContent" class="markdown"></div>
+    </div>
+
+    <div class="footer">
+      Powered by <a href="https://github.com/blocktrails/blocktrails">blocktrails</a>
+      + <a href="https://github.com/JavaScriptSolidServer/nostr-git-client">nostr-git-client</a>
+      • Syncing from <a id="repoLink" href=""></a>
+    </div>
+  </div>
+
+  <div id="updateToast" class="update-toast">✨ Notes updated!</div>
+
+  <div id="savingOverlay" class="saving-overlay">
+    <div class="saving-box">
+      <div class="spinner"></div>
+      <div id="savingText">Saving...</div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "nostr-git-client": "https://esm.sh/nostr-git-client@0.0.2",
+      "blocktrails": "https://esm.sh/blocktrails@0.0.11",
+      "marked": "https://esm.sh/marked@9.0.0",
+      "isomorphic-git": "https://esm.sh/isomorphic-git@1.27.1",
+      "nostr-tools": "https://esm.sh/nostr-tools@2.10.0"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import { NostrGitClient, createFS, createHttpClient } from 'nostr-git-client';
+    import * as blocktrails from 'blocktrails';
+    import { marked } from 'marked';
+    import git from 'isomorphic-git';
+    import * as nostrTools from 'nostr-tools';
+
+    // Helper to convert hex string to Uint8Array
+    function hexToBytes(hex) {
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      }
+      return bytes;
+    }
+
+    const DEFAULT_REPO = 'https://solid.social/mel/public/gitmark';
+    const DEFAULT_BRANCH = 'main';
+    const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol'];
+
+    // Load settings from localStorage
+    let REPO = localStorage.getItem('ngc-repo') || DEFAULT_REPO;
+    let BRANCH = localStorage.getItem('ngc-branch') || DEFAULT_BRANCH;
+    let REPO_ID = REPO.split('/').pop();
+
+    let client;
+    let notes = [];
+    let currentNote = null;
+    let currentContent = '';
+    let editMode = false;
+    let settingsOpen = false;
+    let isEditing = false;
+    let isNewNote = false;
+    let privkey = localStorage.getItem('nostr-privkey') || '';
+    let btcPrivkey = localStorage.getItem('btc-privkey') || '';
+    let anchorChain = []; // State hashes for chained derivation
+    let currentStateHash = null;
+    const BTC_NETWORK = 'testnet4';
+
+    // Bitcoin key handling
+    window.generateBtcKey = function() {
+      // Generate random 32 bytes
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      btcPrivkey = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      document.getElementById('btcPrivkeyInput').value = btcPrivkey;
+      localStorage.setItem('btc-privkey', btcPrivkey);
+      onBtcKeyChange();
+    };
+
+    window.onBtcKeyChange = function() {
+      btcPrivkey = document.getElementById('btcPrivkeyInput').value.trim();
+      localStorage.setItem('btc-privkey', btcPrivkey);
+
+      const display = document.getElementById('btcAddressDisplay');
+      if (btcPrivkey && btcPrivkey.length === 64) {
+        try {
+          const pubkey = blocktrails.getPublicKey(btcPrivkey);
+          const address = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
+          display.innerHTML = `Address: <a href="https://mempool.space/testnet4/address/${address}" target="_blank" style="color:#f59e0b;">${address.slice(0, 12)}...${address.slice(-8)}</a>`;
+          document.getElementById('anchorStatus').style.display = 'flex';
+          verifyAnchor(); // Check current anchor status
+        } catch (e) {
+          display.textContent = 'Invalid key';
+        }
+      } else {
+        display.textContent = '';
+        document.getElementById('anchorStatus').style.display = 'none';
+      }
+    };
+
+    window.checkBalance = async function() {
+      if (!btcPrivkey || btcPrivkey.length !== 64) {
+        alert('Please enter a valid Bitcoin key first');
+        return;
+      }
+      try {
+        const pubkey = blocktrails.getPublicKey(btcPrivkey);
+        const address = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
+        const utxos = await blocktrails.fetchUTXOs(address, BTC_NETWORK);
+        const total = utxos.reduce((sum, u) => sum + u.value, 0);
+        alert(`Balance: ${total} sats at ${address}\n\nGet testnet4 coins from a faucet if needed.`);
+      } catch (e) {
+        alert('Error checking balance: ' + e.message);
+      }
+    };
+
+    function setAnchorStatus(state, text) {
+      document.getElementById('anchorDot').className = `dot ${state}`;
+      document.getElementById('anchorText').textContent = text;
+    }
+
+    async function hashState(commit) {
+      const stateObj = { commit, repo: REPO_ID, branch: BRANCH };
+      const json = JSON.stringify(stateObj);
+      const bytes = new TextEncoder().encode(json);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function verifyAnchor() {
+      if (!btcPrivkey || btcPrivkey.length !== 64 || !client?.currentCommit) {
+        setAnchorStatus('', 'No anchor');
+        return;
+      }
+
+      try {
+        setAnchorStatus('syncing', 'Checking...');
+        const stateHash = await hashState(client.currentCommit);
+        const pubkey = blocktrails.getPublicKey(btcPrivkey);
+
+        // Check if there's a UTXO at the derived address for this state
+        const derivedPubkey = blocktrails.derivePubkey(pubkey, stateHash);
+        const address = blocktrails.pubkeyToAddress(derivedPubkey, BTC_NETWORK);
+        const utxos = await blocktrails.fetchUTXOs(address, BTC_NETWORK);
+
+        if (utxos.length > 0) {
+          currentStateHash = stateHash;
+          anchorChain = [stateHash];
+          setAnchorStatus('synced', `Anchored ✓`);
+        } else {
+          // Check base address for initial state
+          const baseAddress = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
+          const baseUtxos = await blocktrails.fetchUTXOs(baseAddress, BTC_NETWORK);
+          if (baseUtxos.length > 0) {
+            setAnchorStatus('', 'Ready to anchor');
+          } else {
+            setAnchorStatus('error', 'No funds');
+          }
+        }
+      } catch (e) {
+        console.error('Anchor verify error:', e);
+        setAnchorStatus('error', 'Check failed');
+      }
+    }
+
+    async function anchorState(commit) {
+      if (!btcPrivkey || btcPrivkey.length !== 64) {
+        console.log('No BTC key, skipping anchor');
+        return null;
+      }
+
+      const stateHash = await hashState(commit);
+      const pubkey = blocktrails.getPublicKey(btcPrivkey);
+
+      // Determine from/to addresses
+      let fromPubkey, toPubkey;
+      if (anchorChain.length === 0) {
+        fromPubkey = pubkey;
+        toPubkey = blocktrails.derivePubkey(pubkey, stateHash);
+      } else {
+        fromPubkey = blocktrails.deriveChainedPubkey(pubkey, anchorChain);
+        toPubkey = blocktrails.deriveChainedPubkey(pubkey, [...anchorChain, stateHash]);
+      }
+
+      const fromAddress = blocktrails.pubkeyToAddress(fromPubkey, BTC_NETWORK);
+      const toAddress = blocktrails.pubkeyToAddress(toPubkey, BTC_NETWORK);
+
+      // Get UTXOs
+      const utxos = await blocktrails.fetchUTXOs(fromAddress, BTC_NETWORK);
+      if (utxos.length === 0) {
+        throw new Error(`No funds at ${fromAddress}`);
+      }
+
+      // Use largest UTXO
+      const utxo = utxos.reduce((a, b) => a.value > b.value ? a : b);
+
+      // Create and broadcast
+      const tx = blocktrails.createAnchorTx({
+        utxo,
+        privkey: btcPrivkey,
+        prevStates: anchorChain,
+        newState: stateHash,
+        toAddress,
+        fee: 300,
+        network: BTC_NETWORK
+      });
+
+      const txid = await blocktrails.broadcastTx(tx, BTC_NETWORK);
+
+      // Update chain
+      anchorChain.push(stateHash);
+      currentStateHash = stateHash;
+
+      return { txid, address: toAddress, stateHash };
+    }
+
+    // Initialize settings inputs
+    function initSettings() {
+      document.getElementById('repoInput').value = REPO;
+      document.getElementById('branchInput').value = BRANCH;
+      updateRepoLink();
+    }
+
+    function updateRepoLink() {
+      const link = document.getElementById('repoLink');
+      link.href = REPO;
+      link.textContent = new URL(REPO).hostname + new URL(REPO).pathname;
+    }
+
+    window.toggleSettings = function() {
+      settingsOpen = !settingsOpen;
+      document.getElementById('settingsToggle').classList.toggle('active', settingsOpen);
+      document.getElementById('settingsPanel').classList.toggle('show', settingsOpen);
+    };
+
+    window.onSettingsChange = function() {
+      // Just track changes, apply on button click
+    };
+
+    window.applySettings = async function() {
+      const newRepo = document.getElementById('repoInput').value.trim();
+      const newBranch = document.getElementById('branchInput').value.trim() || 'main';
+
+      if (!newRepo) {
+        alert('Please enter a repository URL');
+        return;
+      }
+
+      // Save to localStorage
+      localStorage.setItem('ngc-repo', newRepo);
+      localStorage.setItem('ngc-branch', newBranch);
+
+      // Update globals
+      REPO = newRepo;
+      BRANCH = newBranch;
+      REPO_ID = REPO.split('/').pop();
+
+      updateRepoLink();
+
+      // Clear old data and reinitialize
+      if (client) {
+        client.disconnect();
+        await client.clear();
+      }
+
+      notes = [];
+      currentNote = null;
+      document.getElementById('notesList').innerHTML = '';
+      document.getElementById('noteView').classList.remove('active');
+
+      await init();
+      toggleSettings(); // Close panel
+      showToast('Switched to ' + REPO_ID);
+    };
+
+    function renderMarkdown(text) {
+      return marked.parse(text);
+    }
+
+    function setStatus(state, text) {
+      document.getElementById('statusDot').className = `dot ${state}`;
+      document.getElementById('statusText').textContent = text;
+    }
+
+    function updateTimestamp() {
+      const now = new Date();
+      const time = now.toLocaleTimeString();
+      document.getElementById('lastUpdated').innerHTML = `Last synced: <span class="time">${time}</span>`;
+    }
+
+    function showToast(msg = '✨ Notes updated!') {
+      const toast = document.getElementById('updateToast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    function showSaving(text) {
+      document.getElementById('savingText').textContent = text;
+      document.getElementById('savingOverlay').classList.add('show');
+    }
+
+    function hideSaving() {
+      document.getElementById('savingOverlay').classList.remove('show');
+    }
+
+    window.toggleEditMode = function() {
+      editMode = !editMode;
+      document.getElementById('editToggle').classList.toggle('active', editMode);
+      document.getElementById('keyPanel').classList.toggle('show', editMode);
+      document.getElementById('newNoteBtn').classList.toggle('show', editMode && privkey);
+      document.getElementById('editBtn').classList.toggle('show', editMode && privkey && currentNote);
+    };
+
+    window.onPrivkeyChange = function() {
+      privkey = document.getElementById('privkeyInput').value.trim();
+      localStorage.setItem('nostr-privkey', privkey);
+
+      const pubkeyDisplay = document.getElementById('pubkeyDisplay');
+      if (privkey && privkey.length === 64) {
+        try {
+          const pubkey = nostrTools.getPublicKey(privkey);
+          pubkeyDisplay.textContent = `Pubkey: ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`;
+          document.getElementById('newNoteBtn').classList.toggle('show', editMode);
+          document.getElementById('editBtn').classList.toggle('show', editMode && currentNote);
+        } catch {
+          pubkeyDisplay.textContent = 'Invalid key';
+        }
+      } else {
+        pubkeyDisplay.textContent = '';
+        document.getElementById('newNoteBtn').classList.remove('show');
+        document.getElementById('editBtn').classList.remove('show');
+      }
+    };
+
+    // Initialize privkey inputs from localStorage
+    if (privkey) {
+      document.getElementById('privkeyInput').value = privkey;
+      window.onPrivkeyChange();
+    }
+    if (btcPrivkey) {
+      document.getElementById('btcPrivkeyInput').value = btcPrivkey;
+      window.onBtcKeyChange();
+    }
+
+    async function loadNotes() {
+      const files = await client.listFiles();
+      notes = files.filter(f => f.name.endsWith('.md'));
+      renderList();
+
+      if (currentNote && !isEditing) {
+        await showNote(currentNote);
+      }
+    }
+
+    function renderList() {
+      const list = document.getElementById('notesList');
+
+      if (notes.length === 0) {
+        list.innerHTML = '<p style="text-align:center;color:#666;">No notes yet</p>';
+        return;
+      }
+
+      list.innerHTML = notes.map(note => {
+        const title = note.name.replace('.md', '').replace(/-/g, ' ');
+        const titleCased = title.charAt(0).toUpperCase() + title.slice(1);
+        return `
+          <div class="note-card" onclick="window.showNote('${note.path}')">
+            <h3>${titleCased}</h3>
+            <p>${note.path}</p>
+          </div>
+        `;
+      }).join('');
+    }
+
+    window.showNote = async function(path) {
+      currentNote = path;
+      isNewNote = false;
+      currentContent = await client.readFile(path);
+
+      document.getElementById('noteContent').innerHTML = renderMarkdown(currentContent);
+      document.getElementById('noteContent').style.display = 'block';
+      document.getElementById('noteEditor').style.display = 'none';
+      document.getElementById('filenameInput').style.display = 'none';
+      document.getElementById('editBtn').classList.toggle('show', editMode && privkey);
+      document.getElementById('cancelBtn').style.display = 'none';
+      document.getElementById('saveBtn').style.display = 'none';
+
+      document.getElementById('notesList').style.display = 'none';
+      document.getElementById('newNoteBtn').style.display = 'none';
+      document.getElementById('noteView').classList.add('active');
+      isEditing = false;
+    };
+
+    window.showList = function() {
+      currentNote = null;
+      isEditing = false;
+      isNewNote = false;
+      document.getElementById('notesList').style.display = 'grid';
+      document.getElementById('newNoteBtn').classList.toggle('show', editMode && privkey);
+      document.getElementById('noteView').classList.remove('active');
+    };
+
+    window.newNote = function() {
+      currentNote = null;
+      isNewNote = true;
+      currentContent = '# New Note\n\nStart writing...';
+
+      document.getElementById('noteContent').style.display = 'none';
+      document.getElementById('noteEditor').value = currentContent;
+      document.getElementById('noteEditor').style.display = 'block';
+      document.getElementById('filenameInput').value = '';
+      document.getElementById('filenameInput').style.display = 'block';
+      document.getElementById('filenameInput').placeholder = 'filename.md';
+      document.getElementById('editBtn').style.display = 'none';
+      document.getElementById('cancelBtn').style.display = 'inline-block';
+      document.getElementById('saveBtn').style.display = 'inline-block';
+
+      document.getElementById('notesList').style.display = 'none';
+      document.getElementById('newNoteBtn').style.display = 'none';
+      document.getElementById('noteView').classList.add('active');
+      isEditing = true;
+    };
+
+    window.startEdit = function() {
+      isEditing = true;
+      document.getElementById('noteContent').style.display = 'none';
+      document.getElementById('noteEditor').value = currentContent;
+      document.getElementById('noteEditor').style.display = 'block';
+      document.getElementById('editBtn').style.display = 'none';
+      document.getElementById('cancelBtn').style.display = 'inline-block';
+      document.getElementById('saveBtn').style.display = 'inline-block';
+    };
+
+    window.cancelEdit = function() {
+      if (isNewNote) {
+        showList();
+      } else {
+        isEditing = false;
+        document.getElementById('noteContent').style.display = 'block';
+        document.getElementById('noteEditor').style.display = 'none';
+        document.getElementById('editBtn').classList.toggle('show', editMode && privkey);
+        document.getElementById('cancelBtn').style.display = 'none';
+        document.getElementById('saveBtn').style.display = 'none';
+      }
+    };
+
+    window.saveNote = async function() {
+      if (!privkey) {
+        alert('Please enter your private key first');
+        return;
+      }
+
+      const content = document.getElementById('noteEditor').value;
+      let filepath = currentNote;
+
+      if (isNewNote) {
+        filepath = document.getElementById('filenameInput').value.trim();
+        if (!filepath) {
+          alert('Please enter a filename');
+          return;
+        }
+        if (!filepath.endsWith('.md')) {
+          filepath += '.md';
+        }
+      }
+
+      try {
+        showSaving('Syncing fresh copy...');
+
+        // Clear and re-clone to ensure clean state
+        const fs = client.fs;
+        const dir = client.dir;
+        const http = createNip98HttpClient(privkey);
+
+        // Remove old repo and recreate
+        try {
+          await fs.promises.rm(dir, { recursive: true, force: true });
+        } catch (e) { /* ignore */ }
+        try {
+          await fs.promises.mkdir(dir, { recursive: true });
+        } catch (e) { /* ignore if exists */ }
+
+        // Fresh clone
+        await git.clone({
+          fs,
+          http,
+          dir,
+          url: REPO,
+          ref: BRANCH,
+          singleBranch: true,
+          depth: 1
+        });
+
+        showSaving('Writing file...');
+
+        await fs.promises.writeFile(`${dir}/${filepath}`, content, 'utf8');
+
+        showSaving('Committing...');
+
+        // Git add and commit
+        await git.add({ fs, dir, filepath });
+        await git.commit({
+          fs,
+          dir,
+          message: isNewNote ? `Add ${filepath}` : `Update ${filepath}`,
+          author: { name: 'Live Notes', email: 'notes@example.com' }
+        });
+
+        showSaving('Pushing to server...');
+
+        await git.push({
+          fs,
+          http,
+          dir,
+          url: REPO,
+          ref: BRANCH,
+          force: true
+        });
+
+        showSaving('Publishing to Nostr...');
+
+        // Get new commit hash
+        const commits = await git.log({ fs, dir, depth: 1 });
+        const commit = commits[0].oid;
+
+        // Publish Nostr event
+        await publishNostrEvent(commit);
+
+        // Anchor to Bitcoin if key is set
+        let anchorResult = null;
+        if (btcPrivkey && btcPrivkey.length === 64) {
+          try {
+            showSaving('Anchoring to Bitcoin...');
+            anchorResult = await anchorState(commit);
+            if (anchorResult) {
+              setAnchorStatus('synced', 'Anchored ✓');
+            }
+          } catch (e) {
+            console.error('Anchor failed:', e);
+            setAnchorStatus('error', 'Anchor failed');
+          }
+        }
+
+        hideSaving();
+        showToast(anchorResult ? '✅ Saved & anchored!' : '✅ Saved and published!');
+
+        // Refresh
+        currentNote = filepath;
+        isNewNote = false;
+        isEditing = false;
+        currentContent = content;
+
+        document.getElementById('noteContent').innerHTML = renderMarkdown(content);
+        document.getElementById('noteContent').style.display = 'block';
+        document.getElementById('noteEditor').style.display = 'none';
+        document.getElementById('filenameInput').style.display = 'none';
+        document.getElementById('editBtn').classList.toggle('show', editMode && privkey);
+        document.getElementById('cancelBtn').style.display = 'none';
+        document.getElementById('saveBtn').style.display = 'none';
+
+        updateTimestamp();
+        await loadNotes();
+
+      } catch (err) {
+        hideSaving();
+        console.error('Save failed:', err);
+        alert('Save failed: ' + err.message);
+      }
+    };
+
+    // Concatenate array body (isomorphic-git sends body as array of Uint8Arrays)
+    function concatBody(body) {
+      if (!Array.isArray(body)) return body;
+      const chunks = body.map(c => c instanceof Uint8Array ? c : new Uint8Array(c));
+      const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+      const result = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return result;
+    }
+
+    // Create HTTP client with NIP-98 auth for git operations
+    function createNip98HttpClient(privkey) {
+      return {
+        async request({ url, method, headers, body }) {
+          // Create NIP-98 auth event
+          const pubkey = nostrTools.getPublicKey(privkey);
+
+          const authEvent = {
+            kind: 27235,
+            pubkey,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+              ['u', url],
+              ['method', method || 'GET']
+            ],
+            content: ''
+          };
+
+          // Use finalizeEvent which hashes and signs
+          const signedEvent = nostrTools.finalizeEvent(authEvent, hexToBytes(privkey));
+
+          // Base64 encode the event
+          const authHeader = 'Nostr ' + btoa(JSON.stringify(signedEvent));
+
+          // Concatenate body if array and make request
+          const res = await fetch(url, {
+            method,
+            headers: { ...headers, 'Authorization': authHeader },
+            body: concatBody(body)
+          });
+
+          return {
+            url: res.url,
+            method,
+            statusCode: res.status,
+            statusMessage: res.statusText,
+            headers: Object.fromEntries(res.headers.entries()),
+            body: [new Uint8Array(await res.arrayBuffer())]
+          };
+        }
+      };
+    }
+
+    async function publishNostrEvent(commit) {
+      const secretKey = hexToBytes(privkey);
+
+      const eventTemplate = {
+        kind: 30618,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['d', REPO_ID],
+          [`refs/heads/${BRANCH}`, commit]
+        ],
+        content: ''
+      };
+
+      const signedEvent = nostrTools.finalizeEvent(eventTemplate, secretKey);
+
+      // Publish to relays
+      for (const url of RELAYS) {
+        try {
+          const ws = new WebSocket(url);
+          await new Promise((resolve, reject) => {
+            ws.onopen = () => {
+              ws.send(JSON.stringify(['EVENT', signedEvent]));
+              setTimeout(() => { ws.close(); resolve(); }, 1000);
+            };
+            ws.onerror = reject;
+          });
+        } catch (e) {
+          console.warn('Failed to publish to', url, e);
+        }
+      }
+    }
+
+    // Initialize
+    async function init() {
+      initSettings();
+
+      client = new NostrGitClient({
+        repo: REPO,
+        repoId: REPO_ID,
+        branch: BRANCH,
+        relays: RELAYS
+      });
+
+      client.on('connect', () => {
+        setStatus('syncing', 'Connected, syncing...');
+      });
+
+      client.on('sync', async (event) => {
+        if (event.status === 'complete') {
+          setStatus('synced', `Synced • ${event.commit?.slice(0, 7)}`);
+          updateTimestamp();
+          await loadNotes();
+          // Verify anchor status after sync
+          if (btcPrivkey) {
+            await verifyAnchor();
+          }
+        } else if (event.status === 'error') {
+          setStatus('error', 'Sync failed');
+        }
+      });
+
+      client.on('event', async (event) => {
+        if (event.type === 'repo' && event.commit !== client.currentCommit) {
+          setStatus('syncing', 'Updating...');
+          await client.sync(event.commit);
+          showToast();
+        }
+      });
+
+      setStatus('syncing', 'Connecting...');
+      client.connect();
+      await client.sync();
+    }
+
+    init();
+  </script>
+</body>
+</html>
