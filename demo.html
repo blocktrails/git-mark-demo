@@ -440,6 +440,67 @@
       return bytes;
     }
 
+    function bytesToHex(bytes) {
+      return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Bech32m encoding for P2TR addresses
+    const BECH32M_CONST = 0x2bc830a3;
+    const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+
+    function bech32Polymod(values) {
+      const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+      let chk = 1;
+      for (const v of values) {
+        const top = chk >> 25;
+        chk = ((chk & 0x1ffffff) << 5) ^ v;
+        for (let i = 0; i < 5; i++) { if ((top >> i) & 1) chk ^= GEN[i]; }
+      }
+      return chk;
+    }
+
+    function bech32HrpExpand(hrp) {
+      const ret = [];
+      for (const c of hrp) ret.push(c.charCodeAt(0) >> 5);
+      ret.push(0);
+      for (const c of hrp) ret.push(c.charCodeAt(0) & 31);
+      return ret;
+    }
+
+    function convertBits(data, fromBits, toBits, pad) {
+      let acc = 0, bits = 0;
+      const ret = [], maxv = (1 << toBits) - 1;
+      for (const value of data) {
+        acc = (acc << fromBits) | value;
+        bits += fromBits;
+        while (bits >= toBits) { bits -= toBits; ret.push((acc >> bits) & maxv); }
+      }
+      if (pad && bits > 0) ret.push((acc << (toBits - bits)) & maxv);
+      return ret;
+    }
+
+    function pubkeyToAddress(xonlyPubkey, network = 'testnet4') {
+      const hrp = network === 'mainnet' ? 'bc' : 'tb';
+      const data = [1, ...convertBits(xonlyPubkey, 8, 5, true)];
+      const polymod = bech32Polymod([...bech32HrpExpand(hrp), ...data, 0, 0, 0, 0, 0, 0]) ^ BECH32M_CONST;
+      const checksum = [];
+      for (let i = 0; i < 6; i++) checksum.push((polymod >> (5 * (5 - i))) & 31);
+      return hrp + '1' + [...data, ...checksum].map(d => CHARSET[d]).join('');
+    }
+
+    async function fetchUTXOs(address) {
+      const res = await fetch(`https://mempool.space/testnet4/api/address/${address}/utxo`);
+      return res.json();
+    }
+
+    async function broadcastTx(txHex) {
+      const res = await fetch('https://mempool.space/testnet4/api/tx', {
+        method: 'POST',
+        body: txHex
+      });
+      return res.text();
+    }
+
     const DEFAULT_REPO = 'https://solid.social/mel/public/gitmark';
     const DEFAULT_BRANCH = 'main';
     const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol'];
@@ -478,9 +539,11 @@
         return;
       }
       try {
-        const pubkey = blocktrails.getPublicKey(privkey);
-        const address = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
-        const utxos = await blocktrails.fetchUTXOs(address, BTC_NETWORK);
+        // nostr-tools getPublicKey returns x-only hex (32 bytes)
+        const xonlyHex = nostrTools.getPublicKey(privkey);
+        const xonly = hexToBytes(xonlyHex);
+        const address = pubkeyToAddress(xonly, BTC_NETWORK);
+        const utxos = await fetchUTXOs(address);
         const total = utxos.reduce((sum, u) => sum + u.value, 0);
         alert(`Balance: ${total} sats at ${address}\n\nGet testnet4 coins from a faucet if needed.`);
       } catch (e) {
@@ -510,12 +573,16 @@
       try {
         setAnchorStatus('syncing', 'Checking...');
         const stateHash = await hashState(client.currentCommit);
-        const pubkey = blocktrails.getPublicKey(privkey);
+
+        // Use Blocktrail class to get pubkeyBase (33-byte compressed)
+        const bt = new blocktrails.Blocktrail(privkey);
+        const pubkeyBase = bt.pubkeyBase;
 
         // Check if there's a UTXO at the derived address for this state
-        const derivedPubkey = blocktrails.derivePubkey(pubkey, stateHash);
-        const address = blocktrails.pubkeyToAddress(derivedPubkey, BTC_NETWORK);
-        const utxos = await blocktrails.fetchUTXOs(address, BTC_NETWORK);
+        const derivedPubkey = blocktrails.derivePubkey(pubkeyBase, stateHash);
+        const xonly = blocktrails.p2trXonly(derivedPubkey);
+        const address = pubkeyToAddress(xonly, BTC_NETWORK);
+        const utxos = await fetchUTXOs(address);
 
         if (utxos.length > 0) {
           currentStateHash = stateHash;
@@ -523,8 +590,9 @@
           setAnchorStatus('synced', `Anchored ✓`);
         } else {
           // Check base address for initial state
-          const baseAddress = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
-          const baseUtxos = await blocktrails.fetchUTXOs(baseAddress, BTC_NETWORK);
+          const baseXonly = blocktrails.p2trXonly(pubkeyBase);
+          const baseAddress = pubkeyToAddress(baseXonly, BTC_NETWORK);
+          const baseUtxos = await fetchUTXOs(baseAddress);
           if (baseUtxos.length > 0) {
             setAnchorStatus('', 'Ready to anchor');
           } else {
@@ -544,42 +612,57 @@
       }
 
       const stateHash = await hashState(commit);
-      const pubkey = blocktrails.getPublicKey(privkey);
+      const privkeyBytes = hexToBytes(privkey);
 
-      // Determine from/to addresses
-      let fromPubkey, toPubkey;
+      // Use Blocktrail class to get pubkeyBase
+      const bt = new blocktrails.Blocktrail(privkey);
+      const pubkeyBase = bt.pubkeyBase;
+
+      // Determine from/to pubkeys (33-byte compressed)
+      let fromPubkey, toPubkey, signingKey;
       if (anchorChain.length === 0) {
-        fromPubkey = pubkey;
-        toPubkey = blocktrails.derivePubkey(pubkey, stateHash);
+        fromPubkey = pubkeyBase;
+        toPubkey = blocktrails.derivePubkey(pubkeyBase, stateHash);
+        signingKey = blocktrails.adjustPrivkeyForSigning(privkeyBytes, fromPubkey);
       } else {
-        fromPubkey = blocktrails.deriveChainedPubkey(pubkey, anchorChain);
-        toPubkey = blocktrails.deriveChainedPubkey(pubkey, [...anchorChain, stateHash]);
+        fromPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, anchorChain);
+        toPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, [...anchorChain, stateHash]);
+        const derivedPrivkey = blocktrails.deriveChainedPrivkey(privkeyBytes, anchorChain);
+        signingKey = blocktrails.adjustPrivkeyForSigning(derivedPrivkey, fromPubkey);
       }
 
-      const fromAddress = blocktrails.pubkeyToAddress(fromPubkey, BTC_NETWORK);
-      const toAddress = blocktrails.pubkeyToAddress(toPubkey, BTC_NETWORK);
+      // Get x-only pubkeys for addresses
+      const fromXonly = blocktrails.p2trXonly(fromPubkey);
+      const toXonly = blocktrails.p2trXonly(toPubkey);
+      const fromAddress = pubkeyToAddress(fromXonly, BTC_NETWORK);
+      const toAddress = pubkeyToAddress(toXonly, BTC_NETWORK);
 
       // Get UTXOs
-      const utxos = await blocktrails.fetchUTXOs(fromAddress, BTC_NETWORK);
+      const utxos = await fetchUTXOs(fromAddress);
       if (utxos.length === 0) {
         throw new Error(`No funds at ${fromAddress}`);
       }
 
       // Use largest UTXO
       const utxo = utxos.reduce((a, b) => a.value > b.value ? a : b);
+      const fee = 300;
+      const changeAmount = utxo.value - fee;
 
-      // Create and broadcast
-      const tx = blocktrails.createAnchorTx({
-        utxo,
-        privkey: privkey,
-        prevStates: anchorChain,
-        newState: stateHash,
-        toAddress,
-        fee: 300,
-        network: BTC_NETWORK
+      // Build transaction
+      const toScript = blocktrails.createP2TRScript(toXonly);
+      const tx = blocktrails.buildTransaction({
+        inputs: [{ txid: utxo.txid, vout: utxo.vout, amount: utxo.value, witnessProgram: fromXonly }],
+        outputs: [{ scriptPubKey: toScript, value: changeAmount }]
       });
 
-      const txid = await blocktrails.broadcastTx(tx, BTC_NETWORK);
+      // Sign
+      const prevouts = [{ txid: utxo.txid, vout: utxo.vout, witnessProgram: fromXonly, amount: utxo.value }];
+      const signed = blocktrails.signTransaction(tx, [signingKey], prevouts);
+      const rawBytes = blocktrails.serializeTransaction(signed);
+      const rawHex = bytesToHex(rawBytes);
+
+      // Broadcast
+      const txid = await broadcastTx(rawHex);
 
       // Update chain
       anchorChain.push(stateHash);
@@ -699,9 +782,10 @@
           const pubkey = nostrTools.getPublicKey(privkey);
           pubkeyDisplay.textContent = `Nostr: ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`;
 
-          // Bitcoin address (same key)
-          const btcPubkey = blocktrails.getPublicKey(privkey);
-          const address = blocktrails.pubkeyToAddress(btcPubkey, BTC_NETWORK);
+          // Bitcoin address (same key - use Blocktrail class for pubkeyBase)
+          const bt = new blocktrails.Blocktrail(privkey);
+          const xonly = blocktrails.p2trXonly(bt.pubkeyBase);
+          const address = pubkeyToAddress(xonly, BTC_NETWORK);
           btcDisplay.innerHTML = `Bitcoin: <a href="https://mempool.space/testnet4/address/${address}" target="_blank" style="color:#f59e0b;">${address.slice(0, 12)}...${address.slice(-8)}</a>`;
 
           document.getElementById('newNoteBtn').classList.toggle('show', editMode);
