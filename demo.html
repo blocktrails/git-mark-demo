@@ -585,16 +585,40 @@
       return null;
     }
 
-    // Save trail to repo
-    async function saveTrail() {
-      if (!client || !trail) return;
+    // Save trail to repo (called after anchoring, during save flow)
+    async function saveTrail(dir) {
+      if (!trail) return;
       try {
-        // Ensure .gitmark directory structure
+        // Ensure .gitmark directory exists
+        const gitmarkDir = `${dir}/.gitmark`;
+        try {
+          await fs.promises.mkdir(gitmarkDir);
+        } catch (e) {
+          // Directory may already exist
+        }
+
         const content = JSON.stringify(trail, null, 2);
-        await client.writeFile(TRAIL_FILE, content);
-        await client.commit(`Update anchor trail`);
-        await client.push();
-        console.log('Trail saved');
+        const trailPath = `${dir}/${TRAIL_FILE}`;
+        await fs.promises.writeFile(trailPath, content, 'utf8');
+
+        await git.add({ fs, dir, filepath: TRAIL_FILE });
+        await git.commit({
+          fs,
+          dir,
+          message: 'Update anchor trail',
+          author: { name: 'GitMark', email: 'gitmark@example.com' }
+        });
+
+        await git.push({
+          fs,
+          http,
+          dir,
+          url: REPO,
+          ref: BRANCH,
+          force: true
+        });
+
+        console.log('Trail saved to repo');
       } catch (e) {
         console.error('Failed to save trail:', e);
       }
@@ -769,10 +793,7 @@
         timestamp: new Date().toISOString()
       });
 
-      // Save trail to repo (async, don't block)
-      saveTrail().catch(e => console.error('Trail save failed:', e));
-
-      return { txid, address: toAddress, stateHash };
+      return { txid, address: toAddress, stateHash, trail };
     }
 
     // Initialize settings inputs
@@ -1111,6 +1132,10 @@
             anchorResult = await anchorState(commit);
             if (anchorResult) {
               setAnchorStatus('synced', 'Anchored ✓');
+
+              // Save trail file
+              showSaving('Saving trail...');
+              await saveTrail(dir);
             }
           } catch (e) {
             console.error('Anchor failed:', e);
