@@ -638,7 +638,7 @@
       // Follow the trail
       if (trail && trail.anchors.length > 0) {
         for (let i = trail.anchors.length - 1; i >= 0; i--) {
-          const chain = trail.anchors.slice(0, i + 1).map(a => a.stateHash);
+          const chain = trail.anchors.slice(0, i + 1).map(a => hexToBytes(a.stateHash));
           const derivedPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, chain);
           const xonly = blocktrails.p2trXonly(derivedPubkey);
           const address = pubkeyToAddress(xonly, BTC_NETWORK);
@@ -726,15 +726,19 @@
       const pubkeyBase = bt.pubkeyBase;
 
       // Determine from/to pubkeys (33-byte compressed)
+      // Convert hex state hashes to bytes for derive functions
+      const stateHashBytes = hexToBytes(stateHash);
+      const chainBytes = anchorChain.map(h => hexToBytes(h));
+
       let fromPubkey, toPubkey, signingKey;
       if (anchorChain.length === 0) {
         fromPubkey = pubkeyBase;
-        toPubkey = blocktrails.derivePubkey(pubkeyBase, stateHash);
+        toPubkey = blocktrails.derivePubkey(pubkeyBase, stateHashBytes);
         signingKey = blocktrails.adjustPrivkeyForSigning(privkeyBytes, fromPubkey);
       } else {
-        fromPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, anchorChain);
-        toPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, [...anchorChain, stateHash]);
-        const derivedPrivkey = blocktrails.deriveChainedPrivkey(privkeyBytes, anchorChain);
+        fromPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, chainBytes);
+        toPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, [...chainBytes, stateHashBytes]);
+        const derivedPrivkey = blocktrails.deriveChainedPrivkey(privkeyBytes, chainBytes);
         signingKey = blocktrails.adjustPrivkeyForSigning(derivedPrivkey, fromPubkey);
       }
 
