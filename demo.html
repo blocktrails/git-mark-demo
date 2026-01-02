@@ -357,18 +357,14 @@
     </header>
 
     <div id="keyPanel" class="key-panel">
-      <label>Nostr Private Key (hex)</label>
-      <input type="password" id="privkeyInput" placeholder="Enter your private key to enable editing..." oninput="onPrivkeyChange()">
-      <div class="hint">Used to sign commits and Nostr events.</div>
-      <div id="pubkeyDisplay" class="pubkey"></div>
-
-      <label style="margin-top: 15px;">Bitcoin Private Key (hex) - for anchoring</label>
-      <input type="password" id="btcPrivkeyInput" placeholder="Enter or generate a Bitcoin key..." oninput="onBtcKeyChange()">
+      <label>Private Key (hex) - Nostr + Bitcoin</label>
+      <input type="password" id="privkeyInput" placeholder="Enter your private key..." oninput="onPrivkeyChange()">
       <div style="display: flex; gap: 10px; margin-top: 8px;">
-        <button onclick="generateBtcKey()" style="padding: 6px 12px; background: #f59e0b; border: none; border-radius: 4px; color: #000; cursor: pointer; font-size: 12px;">Generate New</button>
+        <button onclick="generateKey()" style="padding: 6px 12px; background: #f59e0b; border: none; border-radius: 4px; color: #000; cursor: pointer; font-size: 12px;">Generate New</button>
         <button onclick="checkBalance()" style="padding: 6px 12px; background: #1a1a2e; border: 1px solid #2a2a3a; border-radius: 4px; color: #888; cursor: pointer; font-size: 12px;">Check Balance</button>
       </div>
-      <div class="hint">Used to anchor state to Bitcoin testnet4.</div>
+      <div class="hint">Same key for Nostr signing and Bitcoin anchoring (both secp256k1).</div>
+      <div id="pubkeyDisplay" class="pubkey"></div>
       <div id="btcAddressDisplay" class="pubkey"></div>
     </div>
 
@@ -462,50 +458,27 @@
     let isEditing = false;
     let isNewNote = false;
     let privkey = localStorage.getItem('nostr-privkey') || '';
-    let btcPrivkey = localStorage.getItem('btc-privkey') || '';
     let anchorChain = []; // State hashes for chained derivation
     let currentStateHash = null;
     const BTC_NETWORK = 'testnet4';
 
-    // Bitcoin key handling
-    window.generateBtcKey = function() {
-      // Generate random 32 bytes
+    // Key handling - same key for Nostr and Bitcoin
+    window.generateKey = function() {
       const bytes = new Uint8Array(32);
       crypto.getRandomValues(bytes);
-      btcPrivkey = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      document.getElementById('btcPrivkeyInput').value = btcPrivkey;
-      localStorage.setItem('btc-privkey', btcPrivkey);
-      onBtcKeyChange();
-    };
-
-    window.onBtcKeyChange = function() {
-      btcPrivkey = document.getElementById('btcPrivkeyInput').value.trim();
-      localStorage.setItem('btc-privkey', btcPrivkey);
-
-      const display = document.getElementById('btcAddressDisplay');
-      if (btcPrivkey && btcPrivkey.length === 64) {
-        try {
-          const pubkey = blocktrails.getPublicKey(btcPrivkey);
-          const address = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
-          display.innerHTML = `Address: <a href="https://mempool.space/testnet4/address/${address}" target="_blank" style="color:#f59e0b;">${address.slice(0, 12)}...${address.slice(-8)}</a>`;
-          document.getElementById('anchorStatus').style.display = 'flex';
-          verifyAnchor(); // Check current anchor status
-        } catch (e) {
-          display.textContent = 'Invalid key';
-        }
-      } else {
-        display.textContent = '';
-        document.getElementById('anchorStatus').style.display = 'none';
-      }
+      privkey = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      document.getElementById('privkeyInput').value = privkey;
+      localStorage.setItem('nostr-privkey', privkey);
+      onPrivkeyChange();
     };
 
     window.checkBalance = async function() {
-      if (!btcPrivkey || btcPrivkey.length !== 64) {
-        alert('Please enter a valid Bitcoin key first');
+      if (!privkey || privkey.length !== 64) {
+        alert('Please enter a valid key first');
         return;
       }
       try {
-        const pubkey = blocktrails.getPublicKey(btcPrivkey);
+        const pubkey = blocktrails.getPublicKey(privkey);
         const address = blocktrails.pubkeyToAddress(pubkey, BTC_NETWORK);
         const utxos = await blocktrails.fetchUTXOs(address, BTC_NETWORK);
         const total = utxos.reduce((sum, u) => sum + u.value, 0);
@@ -529,7 +502,7 @@
     }
 
     async function verifyAnchor() {
-      if (!btcPrivkey || btcPrivkey.length !== 64 || !client?.currentCommit) {
+      if (!privkey || privkey.length !== 64 || !client?.currentCommit) {
         setAnchorStatus('', 'No anchor');
         return;
       }
@@ -537,7 +510,7 @@
       try {
         setAnchorStatus('syncing', 'Checking...');
         const stateHash = await hashState(client.currentCommit);
-        const pubkey = blocktrails.getPublicKey(btcPrivkey);
+        const pubkey = blocktrails.getPublicKey(privkey);
 
         // Check if there's a UTXO at the derived address for this state
         const derivedPubkey = blocktrails.derivePubkey(pubkey, stateHash);
@@ -565,13 +538,13 @@
     }
 
     async function anchorState(commit) {
-      if (!btcPrivkey || btcPrivkey.length !== 64) {
-        console.log('No BTC key, skipping anchor');
+      if (!privkey || privkey.length !== 64) {
+        console.log('No key, skipping anchor');
         return null;
       }
 
       const stateHash = await hashState(commit);
-      const pubkey = blocktrails.getPublicKey(btcPrivkey);
+      const pubkey = blocktrails.getPublicKey(privkey);
 
       // Determine from/to addresses
       let fromPubkey, toPubkey;
@@ -598,7 +571,7 @@
       // Create and broadcast
       const tx = blocktrails.createAnchorTx({
         utxo,
-        privkey: btcPrivkey,
+        privkey: privkey,
         prevStates: anchorChain,
         newState: stateHash,
         toAddress,
@@ -718,30 +691,44 @@
       localStorage.setItem('nostr-privkey', privkey);
 
       const pubkeyDisplay = document.getElementById('pubkeyDisplay');
+      const btcDisplay = document.getElementById('btcAddressDisplay');
+
       if (privkey && privkey.length === 64) {
         try {
+          // Nostr pubkey
           const pubkey = nostrTools.getPublicKey(privkey);
-          pubkeyDisplay.textContent = `Pubkey: ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`;
+          pubkeyDisplay.textContent = `Nostr: ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`;
+
+          // Bitcoin address (same key)
+          const btcPubkey = blocktrails.getPublicKey(privkey);
+          const address = blocktrails.pubkeyToAddress(btcPubkey, BTC_NETWORK);
+          btcDisplay.innerHTML = `Bitcoin: <a href="https://mempool.space/testnet4/address/${address}" target="_blank" style="color:#f59e0b;">${address.slice(0, 12)}...${address.slice(-8)}</a>`;
+
           document.getElementById('newNoteBtn').classList.toggle('show', editMode);
           document.getElementById('editBtn').classList.toggle('show', editMode && currentNote);
-        } catch {
+          document.getElementById('anchorStatus').style.display = 'flex';
+
+          // Check anchor status
+          if (client?.currentCommit) {
+            verifyAnchor();
+          }
+        } catch (e) {
           pubkeyDisplay.textContent = 'Invalid key';
+          btcDisplay.textContent = '';
         }
       } else {
         pubkeyDisplay.textContent = '';
+        btcDisplay.textContent = '';
         document.getElementById('newNoteBtn').classList.remove('show');
         document.getElementById('editBtn').classList.remove('show');
+        document.getElementById('anchorStatus').style.display = 'none';
       }
     };
 
-    // Initialize privkey inputs from localStorage
+    // Initialize privkey from localStorage
     if (privkey) {
       document.getElementById('privkeyInput').value = privkey;
       window.onPrivkeyChange();
-    }
-    if (btcPrivkey) {
-      document.getElementById('btcPrivkeyInput').value = btcPrivkey;
-      window.onBtcKeyChange();
     }
 
     async function loadNotes() {
@@ -930,7 +917,7 @@
 
         // Anchor to Bitcoin if key is set
         let anchorResult = null;
-        if (btcPrivkey && btcPrivkey.length === 64) {
+        if (privkey && privkey.length === 64) {
           try {
             showSaving('Anchoring to Bitcoin...');
             anchorResult = await anchorState(commit);
@@ -1080,7 +1067,7 @@
           updateTimestamp();
           await loadNotes();
           // Verify anchor status after sync
-          if (btcPrivkey) {
+          if (privkey) {
             await verifyAnchor();
           }
         } else if (event.status === 'error') {
