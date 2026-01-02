@@ -567,22 +567,29 @@
       return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // Load trail from repo
-    async function loadTrail() {
-      if (!client) return null;
+    // Load trail from localStorage (keyed by repo)
+    function loadTrail() {
       try {
-        const content = await client.readFile(TRAIL_FILE);
+        const key = `gitmark-trail-${REPO_ID}`;
+        const content = localStorage.getItem(key);
         if (content) {
           trail = JSON.parse(content);
-          // Rebuild anchorChain from trail
           anchorChain = trail.anchors.map(a => a.stateHash);
           console.log('Trail loaded:', trail.anchors.length, 'anchors');
           return trail;
         }
       } catch (e) {
-        console.log('No trail file yet');
+        console.log('No trail yet');
       }
       return null;
+    }
+
+    // Save trail to localStorage
+    function saveTrailLocal() {
+      if (!trail) return;
+      const key = `gitmark-trail-${REPO_ID}`;
+      localStorage.setItem(key, JSON.stringify(trail));
+      console.log('Trail saved to localStorage');
     }
 
     // Save trail to repo (called after anchoring, during save flow)
@@ -669,8 +676,8 @@
       try {
         setAnchorStatus('syncing', 'Checking...');
 
-        // Load trail from repo
-        await loadTrail();
+        // Load trail from localStorage
+        loadTrail();
 
         const currentCommit = client.currentCommit;
         const stateHash = await hashState(currentCommit);
@@ -1141,23 +1148,8 @@
             if (anchorResult) {
               setAnchorStatus('synced', 'Anchored ✓');
 
-              // Save trail file in the same repo state
-              showSaving('Saving trail...');
-              try {
-                const gitmarkDir = `${dir}/.gitmark`;
-                try { await fs.promises.mkdir(gitmarkDir); } catch (e) {}
-                await fs.promises.writeFile(`${dir}/${TRAIL_FILE}`, JSON.stringify(trail, null, 2), 'utf8');
-                await git.add({ fs, dir, filepath: TRAIL_FILE });
-                await git.commit({
-                  fs, dir,
-                  message: 'Update anchor trail',
-                  author: { name: 'GitMark', email: 'gitmark@example.com' }
-                });
-                await git.push({ fs, http, dir, url: REPO, ref: BRANCH, force: true });
-                console.log('Trail saved');
-              } catch (e) {
-                console.error('Trail save failed:', e);
-              }
+              // Save trail to localStorage
+              saveTrailLocal();
             }
           } catch (e) {
             console.error('Anchor failed:', e);
