@@ -58,6 +58,7 @@
     }
     .dot.syncing { background: #f59e0b; animation: pulse 1s infinite; }
     .dot.synced { background: #10b981; }
+    .dot.warning { background: #f59e0b; }
     .dot.error { background: #ef4444; }
     @keyframes pulse { 50% { opacity: 0.5; } }
 
@@ -522,6 +523,8 @@
     let anchorChain = []; // State hashes for chained derivation
     let currentStateHash = null;
     const BTC_NETWORK = 'testnet4';
+    const TRAIL_FILE = '.gitmark/trail.json';
+    let trail = null; // { network, pubkey, genesis, anchors: [{commit, stateHash, txid, vout}] }
 
     // Key handling - same key for Nostr and Bitcoin
     window.generateKey = function() {
@@ -564,6 +567,75 @@
       return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
+    // Load trail from repo
+    async function loadTrail() {
+      if (!client) return null;
+      try {
+        const content = await client.readFile(TRAIL_FILE);
+        if (content) {
+          trail = JSON.parse(content);
+          // Rebuild anchorChain from trail
+          anchorChain = trail.anchors.map(a => a.stateHash);
+          console.log('Trail loaded:', trail.anchors.length, 'anchors');
+          return trail;
+        }
+      } catch (e) {
+        console.log('No trail file yet');
+      }
+      return null;
+    }
+
+    // Save trail to repo
+    async function saveTrail() {
+      if (!client || !trail) return;
+      try {
+        // Ensure .gitmark directory structure
+        const content = JSON.stringify(trail, null, 2);
+        await client.writeFile(TRAIL_FILE, content);
+        await client.commit(`Update anchor trail`);
+        await client.push();
+        console.log('Trail saved');
+      } catch (e) {
+        console.error('Failed to save trail:', e);
+      }
+    }
+
+    // Follow UTXO trail to find current funds
+    async function findFundsOnTrail(pubkeyBase) {
+      // Check base address first
+      const baseXonly = blocktrails.p2trXonly(pubkeyBase);
+      const baseAddress = pubkeyToAddress(baseXonly, BTC_NETWORK);
+      const baseUtxos = await fetchUTXOs(baseAddress);
+
+      if (baseUtxos.length > 0) {
+        return { position: 'genesis', address: baseAddress, utxos: baseUtxos, chainIndex: -1 };
+      }
+
+      // Follow the trail
+      if (trail && trail.anchors.length > 0) {
+        for (let i = trail.anchors.length - 1; i >= 0; i--) {
+          const chain = trail.anchors.slice(0, i + 1).map(a => a.stateHash);
+          const derivedPubkey = blocktrails.deriveChainedPubkey(pubkeyBase, chain);
+          const xonly = blocktrails.p2trXonly(derivedPubkey);
+          const address = pubkeyToAddress(xonly, BTC_NETWORK);
+          const utxos = await fetchUTXOs(address);
+
+          if (utxos.length > 0) {
+            return {
+              position: 'trail',
+              address,
+              utxos,
+              chainIndex: i,
+              commit: trail.anchors[i].commit,
+              stateHash: trail.anchors[i].stateHash
+            };
+          }
+        }
+      }
+
+      return { position: 'none', utxos: [] };
+    }
+
     async function verifyAnchor() {
       if (!privkey || privkey.length !== 64 || !client?.currentCommit) {
         setAnchorStatus('', 'No anchor');
@@ -572,32 +644,43 @@
 
       try {
         setAnchorStatus('syncing', 'Checking...');
-        const stateHash = await hashState(client.currentCommit);
+
+        // Load trail from repo
+        await loadTrail();
+
+        const currentCommit = client.currentCommit;
+        const stateHash = await hashState(currentCommit);
 
         // Use Blocktrail class to get pubkeyBase (33-byte compressed)
         const bt = new blocktrails.Blocktrail(privkey);
         const pubkeyBase = bt.pubkeyBase;
 
-        // Check if there's a UTXO at the derived address for this state
-        const derivedPubkey = blocktrails.derivePubkey(pubkeyBase, stateHash);
-        const xonly = blocktrails.p2trXonly(derivedPubkey);
-        const address = pubkeyToAddress(xonly, BTC_NETWORK);
-        const utxos = await fetchUTXOs(address);
+        // Find where funds are on the trail
+        const funds = await findFundsOnTrail(pubkeyBase);
 
-        if (utxos.length > 0) {
+        if (funds.position === 'none') {
+          setAnchorStatus('error', 'No funds');
+          return;
+        }
+
+        if (funds.position === 'genesis') {
+          anchorChain = [];
+          currentStateHash = null;
+          setAnchorStatus('', 'Ready to anchor');
+          return;
+        }
+
+        // Funds are on the trail - check if current commit matches
+        if (funds.stateHash === stateHash) {
+          anchorChain = trail.anchors.slice(0, funds.chainIndex + 1).map(a => a.stateHash);
           currentStateHash = stateHash;
-          anchorChain = [stateHash];
           setAnchorStatus('synced', `Anchored ✓`);
         } else {
-          // Check base address for initial state
-          const baseXonly = blocktrails.p2trXonly(pubkeyBase);
-          const baseAddress = pubkeyToAddress(baseXonly, BTC_NETWORK);
-          const baseUtxos = await fetchUTXOs(baseAddress);
-          if (baseUtxos.length > 0) {
-            setAnchorStatus('', 'Ready to anchor');
-          } else {
-            setAnchorStatus('error', 'No funds');
-          }
+          // Funds at different state - need to re-anchor
+          anchorChain = trail.anchors.slice(0, funds.chainIndex + 1).map(a => a.stateHash);
+          currentStateHash = funds.stateHash;
+          const shortCommit = funds.commit?.substring(0, 7) || '?';
+          setAnchorStatus('warning', `Stale (${shortCommit})`);
         }
       } catch (e) {
         console.error('Anchor verify error:', e);
@@ -667,6 +750,27 @@
       // Update chain
       anchorChain.push(stateHash);
       currentStateHash = stateHash;
+
+      // Update trail
+      const pubkeyHex = bytesToHex(pubkeyBase);
+      if (!trail) {
+        trail = {
+          network: BTC_NETWORK,
+          pubkey: pubkeyHex,
+          genesis: anchorChain.length === 1 ? `${utxo.txid}:${utxo.vout}` : trail?.genesis,
+          anchors: []
+        };
+      }
+      trail.anchors.push({
+        commit,
+        stateHash,
+        txid,
+        vout: 0,
+        timestamp: new Date().toISOString()
+      });
+
+      // Save trail to repo (async, don't block)
+      saveTrail().catch(e => console.error('Trail save failed:', e));
 
       return { txid, address: toAddress, stateHash };
     }
